@@ -38,13 +38,30 @@ return [
             'report' => false,
         ],
 
+        // 'public' => [
+        //     'driver' => 'local',
+        //     'root' => storage_path('app/public'),
+        //     'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+        //     'visibility' => 'public',
+        //     'throw' => false,
+        //     'report' => false,
+        // ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            'url' => env('APP_URL').'/storage',
             'visibility' => 'public',
-            'throw' => false,
-            'report' => false,
+            'permissions' => [
+                'file' => [
+                    'public' => 0644,
+                    'private' => 0600,
+                ],
+                'dir' => [
+                    'public' => 0755,
+                    'private' => 0700,
+                ],
+            ],
         ],
 
         's3' => [
