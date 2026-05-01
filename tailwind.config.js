@@ -4,7 +4,8 @@ export default {
         "./resources/**/*.blade.php",
         "./resources/**/*.js",
         "./resources/**/*.vue",
-        "./vendor/robsontenorio/mary/src/View/Components/**/*.php",
+        "./app/Livewire/**/*.php",
+        "./app/Http/Livewire/**/*.php",
     ],
     theme: {
         extend: {},
@@ -13,6 +14,6 @@ export default {
         require('daisyui'),
     ],
     daisyui: {
-        themes: ["light", "dark"],
+        themes: ["light", "dark", "cupcake", "retro", "business"],
     },
 }

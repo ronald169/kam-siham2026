@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 class Patient extends Model
 {
@@ -81,15 +82,16 @@ class Patient extends Model
         'created_by',
     ];
 
-    protected $casts = [
-        'date_of_birth' => 'date',
-        'admission_date' => 'date',
-        'discharge_date' => 'date',
-        'father_alive' => 'boolean',
-        'mother_alive' => 'boolean',
-        'children_list' => 'array',
-        'deleted_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'date_of_birth' => 'date',
+            'admission_date' => 'date',
+            'discharge_date' => 'date',
+            'created_at' => 'datetime',
+            'updated_at' => 'datetime',
+        ];
+    }
 
     // Accesseur pour l'âge calculé automatiquement
     public function setAgeAttribute($value)
@@ -99,6 +101,16 @@ class Patient extends Model
         } else {
             $this->attributes['age'] = $value;
         }
+    }
+
+    public function getFormattedAdmissionDateAttribute()
+    {
+        return $this->admission_date ? Carbon::parse($this->admission_date)->format('d/m/Y') : '-';
+    }
+
+    public function getFormattedCreatedAtAttribute()
+    {
+        return $this->created_at ? Carbon::parse($this->created_at)->format('d/m/Y H:i') : '-';
     }
 
     // Relations
