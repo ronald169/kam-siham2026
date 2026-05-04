@@ -93,7 +93,7 @@
                     <x-menu-sub title="Consultations" icon="o-clipboard-document-list">
                         <x-menu-item title="Toxicologie" icon="o-beaker" link="{{ route('consultations.toxicologie.index') }}" />
                         <x-menu-item title="Psychopathologie" icon="o-document-text" link="{{ route('consultations.psychopathologie.index') }}" />
-                        <x-menu-item title="Médecine Générale" icon="custom.stethoscope" link="{{ route('consultations.medecine') }}" />
+                        <x-menu-item title="Médecine Générale" icon="custom.stethoscope" link="{{ route('consultations.medecine.index') }}" />
                     </x-menu-sub>
 
                     <x-menu-item title="Traitements" icon="o-document-check" link="{{ route('treatments.index') }}" />

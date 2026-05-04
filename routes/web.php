@@ -28,7 +28,7 @@ Route::middleware(['auth'])->group(function () {
         // Consultations
         // Route::livewire('/consultations/toxicologie', 'pages::consultations.toxicologie')->name('consultations.toxicologie');
         // Route::livewire('/consultations/psychopathologie', 'pages::consultations.psychopathologie')->name('consultations.psychopathologie');
-        Route::livewire('/consultations/medecine', 'pages::consultations.medecine')->name('consultations.medecine');
+        // Route::livewire('/consultations/medecine', 'pages::consultations.medecine')->name('consultations.medecine');
 
         // Traitements
         Route::livewire('/treatments', 'pages::treatments.index')->name('treatments.index');
@@ -66,6 +66,14 @@ Route::middleware(['auth', 'role:admin,medecin'])->prefix('consultations/psychop
     Route::livewire('/create', 'pages::consultations.psychopathologie.create')->name('create');
     Route::livewire('/{id}/show', 'pages::consultations.psychopathologie.show')->name('show');
     Route::livewire('/{id}/edit', 'pages::consultations.psychopathologie.edit')->name('edit');
+});
+
+// Consultations Médecine Générale
+Route::middleware(['auth', 'role:admin,medecin'])->prefix('consultations/medecine')->name('consultations.medecine.')->group(function () {
+    Route::livewire('/', 'pages::consultations.medecine.index')->name('index');
+    Route::livewire('/create', 'pages::consultations.medecine.create')->name('create');
+    Route::livewire('/{id}/show', 'pages::consultations.medecine.show')->name('show');
+    Route::livewire('/{id}/edit', 'pages::consultations.medecine.edit')->name('edit');
 });
 
 Route::get('/', function () {

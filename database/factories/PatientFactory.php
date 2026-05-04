@@ -35,7 +35,7 @@ class PatientFactory extends Factory
             'emergency_contact_relation' => fake()->randomElement(['Père', 'Mère', 'Frère', 'Sœur', 'Conjoint(e)', 'Tante', 'Oncle']),
 
             // Dynamique familiale
-            'family_dynamics' => fake()->optional(0.8)->paragraph(),
+            'family_dynamics' => fake()->randomElement(['fonctionnelle', 'non fonctionnelle']),
             'type_of_family' => fake()->randomElement(['Monoparentale', 'Biparentale', 'Élargie', 'Recomposée', 'Famille d\'accueil']),
             'order_child' => fake()->optional(0.7)->randomElement(['Aîné', 'Cadet', 'Benjamin', 'Enfant unique', '2ème', '3ème', '4ème']),
 

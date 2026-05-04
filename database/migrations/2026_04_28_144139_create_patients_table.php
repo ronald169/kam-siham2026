@@ -36,7 +36,7 @@ return new class extends Migration
             $table->string('emergency_contact_relation')->nullable(); // Lien avec le patient
 
             // === DYNAMIQUE FAMILIALE (NOUVEAU) ===
-            $table->text('family_dynamics')->nullable(); // Dynamique familiale
+            $table->string('family_dynamics')->nullable(); // Dynamique familiale
             $table->string('type_of_family')->nullable(); // Type de famille (monoparentale, élargie, etc.)
             $table->string('order_child')->nullable(); // Rang de l'enfant
 
