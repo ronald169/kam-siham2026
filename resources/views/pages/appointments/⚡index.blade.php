@@ -3,6 +3,7 @@
 use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
+use Mary\Traits\Toast;
 use App\Models\Appointment;
 use App\Models\Patient;
 use App\Models\User;
@@ -10,49 +11,39 @@ use App\Models\User;
 new
 #[Title('Rendez-vous')]
 class extends Component {
-    use WithPagination;
+    use WithPagination, Toast;
 
     public string $search = '';
     public ?int $patient_id = null;
     public string $status = '';
+    public string $service_type = '';
     public string $date_filter = '';
     public array $sortBy = ['column' => 'appointment_datetime', 'direction' => 'asc'];
 
-    // Formulaire
+    // Modal formulaire
     public bool $showModal = false;
+    public bool $showDeleteModal = false;
     public ?int $editingId = null;
+    public ?int $appointmentToDelete = null;
     public ?int $patientId = null;
     public string $appointment_datetime = '';
-    public string $service_type = '';
-    public string $reason = '';
-    public string $notes = '';
+    public string $serviceType = '';
+    public ?string $reason = '';
+    public ?string $notes = '';
 
     public function getPatientsProperty()
     {
-        $query = Patient::query()
-            ->when($this->search, fn($q) => $q->where('name', 'like', "%{$this->search}%"))
-            ->orderBy('name');
-
-        if (auth()->user()->isMedecin()) {
-            $query->where('referring_doctor_id', auth()->id());
-        }
-
-        return $query->get();
+        return Patient::orderBy('name')->get(['id', 'name', 'medical_record_number']);
     }
 
-    public function getAppointmentsProperty()
+    public function getStatusesProperty()
     {
-        $query = Appointment::query()
-            ->with(['patient', 'doctor'])
-            ->when(auth()->user()->role === 'medecin', fn($q) => $q->where('doctor_id', auth()->id()))
-            ->when($this->patient_id, fn($q) => $q->where('patient_id', $this->patient_id))
-            ->when($this->status, fn($q) => $q->where('status', $this->status))
-            ->when($this->date_filter === 'today', fn($q) => $q->whereDate('appointment_datetime', today()))
-            ->when($this->date_filter === 'tomorrow', fn($q) => $q->whereDate('appointment_datetime', now()->addDay()))
-            ->when($this->date_filter === 'week', fn($q) => $q->whereBetween('appointment_datetime', [now(), now()->addWeek()]))
-            ->orderBy($this->sortBy['column'], $this->sortBy['direction']);
-
-        return $query->paginate(15);
+        return [
+            ['id' => 'scheduled', 'name' => 'Programmé'],
+            ['id' => 'completed', 'name' => 'Effectué'],
+            ['id' => 'cancelled', 'name' => 'Annulé'],
+            ['id' => 'no_show', 'name' => 'Non présenté'],
+        ];
     }
 
     public function getServiceTypesProperty()
@@ -64,14 +55,21 @@ class extends Component {
         ];
     }
 
-    public function getStatusesProperty()
+    public function getAppointmentsProperty()
     {
-        return [
-            ['id' => 'scheduled', 'name' => 'Programmé'],
-            ['id' => 'completed', 'name' => 'Effectué'],
-            ['id' => 'cancelled', 'name' => 'Annulé'],
-            ['id' => 'no_show', 'name' => 'Non présenté'],
-        ];
+        $query = Appointment::query()
+            ->with(['patient', 'doctor'])
+            ->when(auth()->user()->isMedecin(), fn($q) => $q->where('doctor_id', auth()->id()))
+            ->when($this->patient_id, fn($q) => $q->where('patient_id', $this->patient_id))
+            ->when($this->status, fn($q) => $q->where('status', $this->status))
+            ->when($this->service_type, fn($q) => $q->where('service_type', $this->service_type))
+            ->when($this->date_filter === 'today', fn($q) => $q->whereDate('appointment_datetime', today()))
+            ->when($this->date_filter === 'tomorrow', fn($q) => $q->whereDate('appointment_datetime', now()->addDay()))
+            ->when($this->date_filter === 'week', fn($q) => $q->whereBetween('appointment_datetime', [now(), now()->addWeek()]))
+            ->when($this->search, fn($q) => $q->whereHas('patient', fn($sq) => $sq->where('name', 'like', "%{$this->search}%")))
+            ->orderBy($this->sortBy['column'], $this->sortBy['direction']);
+
+        return $query->paginate(15);
     }
 
     public function create()
@@ -87,7 +85,7 @@ class extends Component {
         $this->editingId = $id;
         $this->patientId = $appointment->patient_id;
         $this->appointment_datetime = $appointment->appointment_datetime->format('Y-m-d\TH:i');
-        $this->service_type = $appointment->service_type;
+        $this->serviceType = $appointment->service_type;
         $this->reason = $appointment->reason;
         $this->notes = $appointment->notes;
         $this->showModal = true;
@@ -98,7 +96,7 @@ class extends Component {
         $this->validate([
             'patientId' => 'required|exists:patients,id',
             'appointment_datetime' => 'required|date',
-            'service_type' => 'required|in:toxicologie,psychopathologie,medecine',
+            'serviceType' => 'required|in:toxicologie,psychopathologie,medecine',
             'reason' => 'nullable|string',
             'notes' => 'nullable|string',
         ]);
@@ -107,7 +105,7 @@ class extends Component {
             'patient_id' => $this->patientId,
             'doctor_id' => auth()->id(),
             'appointment_datetime' => $this->appointment_datetime,
-            'service_type' => $this->service_type,
+            'service_type' => $this->serviceType,
             'reason' => $this->reason,
             'notes' => $this->notes,
             'status' => 'scheduled',
@@ -116,10 +114,10 @@ class extends Component {
         if ($this->editingId) {
             $appointment = Appointment::findOrFail($this->editingId);
             $appointment->update($data);
-            session()->flash('success', 'Rendez-vous modifié avec succès.');
+            $this->success('Rendez-vous modifié avec succès.');
         } else {
             Appointment::create($data);
-            session()->flash('success', 'Rendez-vous créé avec succès.');
+            $this->success('Rendez-vous créé avec succès.');
         }
 
         $this->showModal = false;
@@ -138,18 +136,29 @@ class extends Component {
             'no_show' => 'non présenté',
         ];
 
-        session()->flash('success', "Rendez-vous marqué comme {$labels[$status]}.");
+        $this->success("Rendez-vous marqué comme {$labels[$status]}.");
     }
 
-    public function delete($id)
+    public function confirmDelete($id)
     {
-        Appointment::findOrFail($id)->delete();
-        session()->flash('success', 'Rendez-vous supprimé avec succès.');
+        $this->appointmentToDelete = $id;
+        $this->showDeleteModal = true;
+    }
+
+    public function delete()
+    {
+        $appointment = Appointment::find($this->appointmentToDelete);
+        if ($appointment) {
+            $appointment->delete();
+            $this->success('Rendez-vous supprimé avec succès.');
+        }
+        $this->showDeleteModal = false;
+        $this->appointmentToDelete = null;
     }
 
     public function resetForm()
     {
-        $this->reset(['editingId', 'patientId', 'appointment_datetime', 'service_type', 'reason', 'notes']);
+        $this->reset(['editingId', 'patientId', 'appointment_datetime', 'serviceType', 'reason', 'notes']);
         $this->resetValidation();
     }
 
@@ -158,8 +167,8 @@ class extends Component {
         return $this->view([
             'patients' => $this->patients,
             'appointments' => $this->appointments,
-            'serviceTypes' => $this->serviceTypes,
             'statuses' => $this->statuses,
+            'serviceTypes' => $this->serviceTypes,
         ]);
     }
 };
@@ -167,193 +176,204 @@ class extends Component {
 ?>
 
 <div>
-    {{-- En-tête --}}
-    <div class="flex justify-between items-center mb-6">
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
         <div>
             <h1 class="text-3xl font-bold">Rendez-vous</h1>
             <p class="text-base-content/70 mt-1">Gestion des consultations programmées</p>
         </div>
-        <button wire:click="create" class="btn btn-primary">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            Nouveau rendez-vous
-        </button>
+        <x-button label="Nouveau rendez-vous" icon="o-plus" class="btn-primary" wire:click="create" />
     </div>
 
     {{-- Filtres --}}
-    <div class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <select wire:model.live="patient_id" class="select select-bordered w-full">
-                    <option value="">Tous les patients</option>
-                    @foreach($patients as $patient)
-                        <option value="{{ $patient->id }}">{{ $patient->name }}</option>
-                    @endforeach
-                </select>
+    <x-card class="mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <x-choices-offline
+                label="Patient"
+                wire:model.live="patient_id"
+                :options="$patients"
+                option-value="id"
+                option-label="name"
+                placeholder="Tous les patients"
+                id="patient_id"
+                name="patient_id"
+                single
+                clearable
+                searchable />
 
-                <select wire:model.live="status" class="select select-bordered w-full">
-                    <option value="">Tous les statuts</option>
-                    @foreach($statuses as $status)
-                        <option value="{{ $status['id'] }}">{{ $status['name'] }}</option>
-                    @endforeach
-                </select>
+            <x-select
+                label="Statut"
+                wire:model.live="status"
+                :options="$statuses"
+                option-value="id"
+                option-label="name"
+                placeholder="Tous les statuts"
+                id="status"
+                name="status"
+                clearable />
 
-                <select wire:model.live="date_filter" class="select select-bordered w-full">
-                    <option value="">Toutes les dates</option>
-                    <option value="today">Aujourd'hui</option>
-                    <option value="tomorrow">Demain</option>
-                    <option value="week">Cette semaine</option>
-                </select>
+            <x-select
+                label="Service"
+                wire:model.live="service_type"
+                :options="$serviceTypes"
+                option-value="id"
+                option-label="name"
+                placeholder="Tous les services"
+                id="service_type"
+                name="service_type"
+                clearable />
 
-                <input type="text" wire:model.live.debounce.300ms="search" placeholder="Rechercher..." class="input input-bordered w-full" />
-            </div>
+            <x-select
+                label="Période"
+                wire:model.live="date_filter"
+                :options="[
+                    ['id' => '', 'name' => 'Toutes les dates'],
+                    ['id' => 'today', 'name' => 'Aujourd\'hui'],
+                    ['id' => 'tomorrow', 'name' => 'Demain'],
+                    ['id' => 'week', 'name' => 'Cette semaine'],
+                ]"
+                option-value="id"
+                option-label="name"
+                id="date_filter"
+                name="date_filter"
+                clearable />
+
+            <x-input
+                label="Recherche"
+                icon="o-magnifying-glass"
+                wire:model.live.debounce.300ms="search"
+                placeholder="Nom du patient"
+                clearable />
         </div>
-    </div>
+    </x-card>
 
     {{-- Tableau --}}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body p-0 overflow-x-auto">
-            <table class="table table-zebra">
-                <thead>
-                    <tr>
-                        <th>Date & Heure</th>
-                        <th>Patient</th>
-                        <th>Service</th>
-                        <th>Motif</th>
-                        <th>Statut</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($appointments as $appointment)
-                    <tr class="hover">
-                        <td>{{ \Carbon\Carbon::parse($appointment->appointment_datetime)->format('d/m/Y H:i') }}</td>
-                        <td class="font-medium">{{ $appointment->patient->name }}<br>
-                            <span class="text-xs text-base-content/60">{{ $appointment->patient->medical_record_number }}</span>
-                        </td>
-                        <td>
-                            @php
-                                $serviceLabels = [
-                                    'toxicologie' => 'Toxicologie',
-                                    'psychopathologie' => 'Psychopathologie',
-                                    'medecine' => 'Médecine',
-                                ];
-                            @endphp
-                            <span class="badge badge-info badge-sm">{{ $serviceLabels[$appointment->service_type] }}</span>
-                        </td>
-                        <td>{{ Str::limit($appointment->reason, 40) ?? '-' }}</td>
-                        <td>
-                            @php
-                                $statusClasses = [
-                                    'scheduled' => 'badge-warning',
-                                    'completed' => 'badge-success',
-                                    'cancelled' => 'badge-error',
-                                    'no_show' => 'badge-neutral',
-                                ];
-                                $statusLabels = [
-                                    'scheduled' => 'Programmé',
-                                    'completed' => 'Effectué',
-                                    'cancelled' => 'Annulé',
-                                    'no_show' => 'Non présenté',
-                                ];
-                            @endphp
-                            <span class="badge {{ $statusClasses[$appointment->status] }} badge-sm">{{ $statusLabels[$appointment->status] }}</span>
-                        </td>
-                        <td>
-                            <div class="flex gap-2">
-                                @if($appointment->status === 'scheduled')
-                                    <button wire:click="updateStatus({{ $appointment->id }}, 'completed')" class="btn btn-xs btn-success" title="Marquer effectué">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    </button>
-                                    <button wire:click="updateStatus({{ $appointment->id }}, 'cancelled')" class="btn btn-xs btn-error" title="Annuler">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
-                                    </button>
-                                @endif
-                                <button wire:click="edit({{ $appointment->id }})" class="btn btn-xs btn-ghost">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                </button>
-                                <button wire:click="delete({{ $appointment->id }})" wire:confirm="Supprimer ce rendez-vous ?" class="btn btn-xs btn-ghost text-error">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr class="hover">
-                        <td colspan="6" class="text-center py-8">Aucun rendez-vous trouvé</td>
-                     </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-        <div class="card-actions justify-end p-4">
-            {{ $appointments->links() }}
-        </div>
-    </div>
+    <x-card>
+        <x-table
+            :headers="[
+                ['key' => 'appointment_datetime', 'label' => 'Date & Heure', 'sortable' => true],
+                ['key' => 'patient.name', 'label' => 'Patient'],
+                ['key' => 'patient.medical_record_number', 'label' => 'N° Dossier'],
+                ['key' => 'service_type', 'label' => 'Service'],
+                ['key' => 'reason', 'label' => 'Motif'],
+                ['key' => 'doctor.name', 'label' => 'Médecin'],
+                ['key' => 'status', 'label' => 'Statut'],
+                ['key' => 'actions', 'label' => 'Actions'],
+            ]"
+            :rows="$appointments"
+            :sort-by="$sortBy"
+            with-pagination
+            striped>
+
+            @scope('cell_appointment_datetime', $appointment)
+                <div class="font-medium">{{ \Carbon\Carbon::parse($appointment['appointment_datetime'])->format('d/m/Y') }}</div>
+                <div class="text-xs text-base-content/60">{{ \Carbon\Carbon::parse($appointment['appointment_datetime'])->format('H:i') }}</div>
+            @endscope
+
+            @scope('cell_service_type', $appointment)
+                @php
+                    $serviceLabels = [
+                        'toxicologie' => 'Toxicologie',
+                        'psychopathologie' => 'Psychopathologie',
+                        'medecine' => 'Médecine',
+                    ];
+                @endphp
+                <x-badge :value="$serviceLabels[$appointment['service_type']]" class="badge-info badge-soft" />
+            @endscope
+
+            @scope('cell_status', $appointment)
+                @php
+                    $statusClasses = [
+                        'scheduled' => 'badge-warning',
+                        'completed' => 'badge-success',
+                        'cancelled' => 'badge-error',
+                        'no_show' => 'badge-neutral',
+                    ];
+                    $statusLabels = [
+                        'scheduled' => 'Programmé',
+                        'completed' => 'Effectué',
+                        'cancelled' => 'Annulé',
+                        'no_show' => 'Non présenté',
+                    ];
+                @endphp
+                <x-badge :value="$statusLabels[$appointment['status']]" :class="$statusClasses[$appointment['status']] . ' badge-soft'" />
+            @endscope
+
+            @scope('actions', $appointment)
+                <div class="flex gap-1">
+                    {{-- Actions rapides selon statut --}}
+                    @if($appointment['status'] === 'scheduled')
+                        <x-button icon="o-check-circle" class="btn-circle btn-ghost btn-sm btn-success"
+                            tooltip-left="Marquer effectué"
+                            wire:click="updateStatus({{ $appointment['id'] }}, 'completed')" />
+                        <x-button icon="o-x-circle" class="btn-circle btn-ghost btn-sm btn-error"
+                            tooltip-left="Annuler"
+                            wire:click="updateStatus({{ $appointment['id'] }}, 'cancelled')" />
+                    @endif
+
+                    {{-- Actions standard --}}
+                    <x-button icon="o-pencil" class="btn-circle btn-ghost btn-sm"
+                        tooltip-left="Modifier" wire:click="edit({{ $appointment['id'] }})" />
+                    <x-button icon="o-trash" class="btn-circle btn-ghost btn-sm"
+                        tooltip-left="Supprimer" wire:click="confirmDelete({{ $appointment['id'] }})" />
+                </div>
+            @endscope
+        </x-table>
+    </x-card>
 
     {{-- Modal Formulaire --}}
-    <dialog class="modal {{ $showModal ? 'modal-open' : '' }}">
-        <div class="modal-box w-11/12 max-w-2xl">
-            <h3 class="font-bold text-lg mb-4">{{ $editingId ? 'Modifier le rendez-vous' : 'Nouveau rendez-vous' }}</h3>
+    <x-modal wire:model="showModal" title="{{ $editingId ? 'Modifier le rendez-vous' : 'Nouveau rendez-vous' }}" size="2xl" separator>
+        <x-form wire:submit="save">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <x-choices-offline
+                    label="Patient"
+                    wire:model="patientId"
+                    :options="$patients"
+                    option-value="id"
+                    option-label="name"
+                    required
+                    id="patientId"
+                    name="patientId"
+                    single
+                    clearable
+                    searchable />
 
-            <form wire:submit="save">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="form-control">
-                        <label class="label"><span class="label-text font-medium">Patient *</span></label>
-                        <select wire:model="patientId" class="select select-bordered" required>
-                            <option value="">Sélectionner un patient</option>
-                            @foreach($patients as $patient)
-                                <option value="{{ $patient->id }}">{{ $patient->name }} - {{ $patient->medical_record_number }}</option>
-                            @endforeach
-                        </select>
-                        @error('patientId') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
+                <x-select
+                    label="Service"
+                    wire:model="serviceType"
+                    :options="$serviceTypes"
+                    option-value="id"
+                    option-label="name"
+                    required
+                    id="serviceType"
+                    name="serviceType" />
 
-                    <div class="form-control">
-                        <label class="label"><span class="label-text font-medium">Service *</span></label>
-                        <select wire:model="service_type" class="select select-bordered" required>
-                            <option value="">Sélectionner</option>
-                            @foreach($serviceTypes as $service)
-                                <option value="{{ $service['id'] }}">{{ $service['name'] }}</option>
-                            @endforeach
-                        </select>
-                        @error('service_type') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-
-                    <div class="form-control md:col-span-2">
-                        <label class="label"><span class="label-text font-medium">Date et heure *</span></label>
-                        <input type="datetime-local" wire:model="appointment_datetime" class="input input-bordered" required />
-                        @error('appointment_datetime') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-
-                    <div class="form-control md:col-span-2">
-                        <label class="label"><span class="label-text font-medium">Motif</span></label>
-                        <textarea wire:model="reason" class="textarea textarea-bordered" rows="2" placeholder="Raison de la consultation"></textarea>
-                    </div>
-
-                    <div class="form-control md:col-span-2">
-                        <label class="label"><span class="label-text font-medium">Notes</span></label>
-                        <textarea wire:model="notes" class="textarea textarea-bordered" rows="2" placeholder="Informations complémentaires"></textarea>
-                    </div>
+                <div class="form-control md:col-span-2">
+                    <x-datetime label="Date et heure" type="datetime-local" wire:model="appointment_datetime" required />
+                    @error('appointment_datetime') <span class="text-error text-xs">{{ $message }}</span> @enderror
                 </div>
 
-                <div class="modal-action mt-6">
-                    <button type="button" wire:click="$set('showModal', false)" class="btn btn-ghost">Annuler</button>
-                    <button type="submit" class="btn btn-primary">Enregistrer</button>
+                <div class="form-control md:col-span-2">
+                    <x-textarea label="Motif" wire:model="reason" class="textarea textarea-bordered" rows="2" placeholder="Raison de la consultation..."></x-textarea>
                 </div>
-            </form>
-        </div>
-        <form method="dialog" class="modal-backdrop">
-            <button wire:click="$set('showModal', false)">Fermer</button>
-        </form>
-    </dialog>
+
+                <div class="form-control md:col-span-2">
+                    <x-textarea label="Notes" wire:model="notes" placeholder="Informations complémex-textarea" />
+                </div>
+            </div>
+
+            <x-slot:actions>
+                <x-button label="Annuler" wire:click="$set('showModal', false)" />
+                <x-button label="{{ $editingId ? 'Modifier' : 'Créer' }}" class="btn-primary" type="submit" spinner="save" />
+            </x-slot:actions>
+        </x-form>
+    </x-modal>
+
+    {{-- Modal Confirmation Suppression --}}
+    <x-modal wire:model="showDeleteModal" title="Confirmation" separator>
+        <p>Êtes-vous sûr de vouloir supprimer ce rendez-vous ? Cette action est irréversible.</p>
+        <x-slot:actions>
+            <x-button label="Annuler" wire:click="$set('showDeleteModal', false)" />
+            <x-button label="Supprimer" class="btn-error" wire:click="delete" spinner="delete" />
+        </x-slot:actions>
+    </x-modal>
 </div>
