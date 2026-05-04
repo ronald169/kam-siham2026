@@ -27,7 +27,7 @@ Route::middleware(['auth'])->group(function () {
 
         // Consultations
         // Route::livewire('/consultations/toxicologie', 'pages::consultations.toxicologie')->name('consultations.toxicologie');
-        Route::livewire('/consultations/psychopathologie', 'pages::consultations.psychopathologie')->name('consultations.psychopathologie');
+        // Route::livewire('/consultations/psychopathologie', 'pages::consultations.psychopathologie')->name('consultations.psychopathologie');
         Route::livewire('/consultations/medecine', 'pages::consultations.medecine')->name('consultations.medecine');
 
         // Traitements
@@ -59,6 +59,13 @@ Route::middleware(['auth', 'role:admin,medecin'])->prefix('consultations/toxicol
     Route::livewire('/create', 'pages::consultations.toxicologie.create')->name('create');
     Route::livewire('/{id}/show', 'pages::consultations.toxicologie.show')->name('show');
     Route::livewire('/{id}/edit', 'pages::consultations.toxicologie.edit')->name('edit');
+});
+
+Route::middleware(['auth', 'role:admin,medecin'])->prefix('consultations/psychopathologie')->name('consultations.psychopathologie.')->group(function () {
+    Route::livewire('/', 'pages::consultations.psychopathologie.index')->name('index');
+    Route::livewire('/create', 'pages::consultations.psychopathologie.create')->name('create');
+    Route::livewire('/{id}/show', 'pages::consultations.psychopathologie.show')->name('show');
+    Route::livewire('/{id}/edit', 'pages::consultations.psychopathologie.edit')->name('edit');
 });
 
 Route::get('/', function () {
