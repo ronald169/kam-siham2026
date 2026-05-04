@@ -26,12 +26,19 @@ Route::middleware(['auth'])->group(function () {
         Route::livewire('/patients/{id}/edit', 'pages::patients.edit')->name('patients.edit');
 
         // Consultations
-        Route::livewire('/consultations/toxicologie', 'pages::consultations.toxicologie')->name('consultations.toxicologie');
+        // Route::livewire('/consultations/toxicologie', 'pages::consultations.toxicologie')->name('consultations.toxicologie');
         Route::livewire('/consultations/psychopathologie', 'pages::consultations.psychopathologie')->name('consultations.psychopathologie');
         Route::livewire('/consultations/medecine', 'pages::consultations.medecine')->name('consultations.medecine');
 
         // Traitements
         Route::livewire('/treatments', 'pages::treatments.index')->name('treatments.index');
+
+        // Traitements
+        Route::prefix('treatments')->name('treatments.')->group(function () {
+            Route::livewire('/', 'pages::treatments.index')->name('index');
+            Route::livewire('/create', 'pages::treatments.create')->name('create');
+            Route::livewire('/{id}/edit', 'pages::treatments.edit')->name('edit');
+        });
 
         // Rendez-vous
         Route::livewire('/appointments', 'pages::appointments.index')->name('appointments.index');
@@ -44,6 +51,14 @@ Route::middleware(['auth'])->group(function () {
     Route::middleware(['role:admin'])->prefix('admin')->name('admin.')->group(function () {
         Route::livewire('/users', 'pages::admin.users')->name('users');
     });
+});
+
+// Consultations Toxicologie
+Route::middleware(['auth', 'role:admin,medecin'])->prefix('consultations/toxicologie')->name('consultations.toxicologie.')->group(function () {
+    Route::livewire('/', 'pages::consultations.toxicologie.index')->name('index');
+    Route::livewire('/create', 'pages::consultations.toxicologie.create')->name('create');
+    Route::livewire('/{id}/show', 'pages::consultations.toxicologie.show')->name('show');
+    Route::livewire('/{id}/edit', 'pages::consultations.toxicologie.edit')->name('edit');
 });
 
 Route::get('/', function () {

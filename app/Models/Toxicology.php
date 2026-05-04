@@ -2,59 +2,15 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
+#[Fillable(['patient_id', 'doctor_id', 'consultation_date', 'status', 'substances_used', 'substances_start_age', 'substances_start_reason', 'current_consumption_motivation', 'tolerance_description', 'withdrawal_attempts', 'stop_motivation', 'substances_types', 'max_abstinence_duration', 'substance_relation', 'weight_loss', 'pale_complexion', 'withdrawal_insomnia', 'nightmares', 'hallucinations', 'somatic_disorders', 'behavioral_delirium', 'legal_issues', 'affective_fulfillment', 'sexual_fulfillment', 'consumption_pattern', 'dependency_investment', 'general_condition', 'respiratory_signs', 'neurological_signs', 'psychiatric_disorders', 'other_symptoms', 'medical_surgical_history', 'allergy_history', 'psychiatric_history', 'trauma_history', 'psychological_assessment', 'biological_assessment', 'diagnostic_conclusion', 'treatment_plan', 'recommendations'])]
 class Toxicology extends Model
 {
     use HasFactory;
-
-    protected $table = 'toxicologies';
-
-    protected $fillable = [
-        'patient_id',
-        'doctor_id',
-        'consultation_date',
-        'status',
-        'substances_used',
-        'substances_start_age',
-        'substances_start_reason',
-        'current_consumption_motivation',
-        'tolerance_description',
-        'withdrawal_attempts',
-        'stop_motivation',
-        'substances_types',
-        'max_abstinence_duration',
-        'substance_relation',
-        'weight_loss',
-        'pale_complexion',
-        'withdrawal_insomnia',
-        'nightmares',
-        'hallucinations',
-        'somatic_disorders',
-        'behavioral_delirium',
-        'legal_issues',
-        'affective_fulfillment',
-        'sexual_fulfillment',
-        'consumption_pattern',
-        'dependency_investment',
-        'general_condition',
-        'respiratory_signs',
-        'neurological_signs',
-        'psychiatric_disorders',
-        'other_symptoms',
-        'medical_surgical_history',
-        'allergy_history',
-        'psychiatric_history',
-        'trauma_history',
-        'psychological_assessment',
-        'biological_assessment',
-        'diagnostic_conclusion',
-        'treatment_plan',
-        'recommendations',
-        'documents',
-    ];
 
     protected $casts = [
         'consultation_date' => 'date',
@@ -83,6 +39,12 @@ class Toxicology extends Model
     public function treatments()
     {
         return $this->morphMany(Treatment::class, 'treatable');
+    }
+
+    // Accesseur pour le compteur
+    public function getTreatmentsCountAttribute()
+    {
+        return $this->treatments()->count();
     }
 
     // Méthode pour ajouter un document

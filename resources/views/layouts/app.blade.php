@@ -9,6 +9,10 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
     @stack('styles')
+
+    {{-- Flatpickr  --}}
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 </head>
 <body class="min-h-screen font-sans antialiased bg-base-200">
 
@@ -87,7 +91,7 @@
                 {{-- Consultations (Admin & Médecin) --}}
                 @if(auth()->user()->isAdmin() || auth()->user()->isMedecin())
                     <x-menu-sub title="Consultations" icon="o-clipboard-document-list">
-                        <x-menu-item title="Toxicologie" icon="o-beaker" link="{{ route('consultations.toxicologie') }}" />
+                        <x-menu-item title="Toxicologie" icon="o-beaker" link="{{ route('consultations.toxicologie.index') }}" />
                         <x-menu-item title="Psychopathologie" icon="o-document-text" link="{{ route('consultations.psychopathologie') }}" />
                         <x-menu-item title="Médecine Générale" icon="custom.stethoscope" link="{{ route('consultations.medecine') }}" />
                     </x-menu-sub>
@@ -99,7 +103,7 @@
                 {{-- Consultations (Consultant - lecture seule) --}}
                 @if(auth()->user()->isConsultant())
                     <x-menu-sub title="Consultations" icon="o-document-magnifying-glass">
-                        <x-menu-item title="Toxicologie" icon="o-beaker" link="{{ route('consultations.toxicologie') }}" />
+                        <x-menu-item title="Toxicologie" icon="o-beaker" link="{{ route('consultations.toxicologie.index') }}" />
                         <x-menu-item title="Psychopathologie" icon="o-document-text" link="{{ route('consultations.psychopathologie') }}" />
                         <x-menu-item title="Médecine Générale" icon="custom.stethoscope" link="{{ route('consultations.medecine') }}" />
                     </x-menu-sub>

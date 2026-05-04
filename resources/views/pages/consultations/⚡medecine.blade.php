@@ -4,19 +4,20 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
+use Mary\Traits\Toast;
 use App\Models\Medecine;
 use App\Models\Patient;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 new
 #[Title('Consultations - Médecine Générale')]
 class extends Component {
-    use WithPagination, WithFileUploads;
+    use WithPagination, WithFileUploads, Toast;
 
     public string $search = '';
     public ?int $patient_id = null;
     public array $sortBy = ['column' => 'consultation_date', 'direction' => 'desc'];
 
-    // Formulaire
     public bool $showModal = false;
     public ?int $editingId = null;
     public ?int $patientId = null;
@@ -32,13 +33,14 @@ class extends Component {
     public ?string $next_appointment = null;
     public string $follow_up_instructions = '';
     public $documents = [];
+    public array $existingDocuments = [];
 
     public function getPatientsProperty()
     {
         return Patient::query()
             ->when($this->search, fn($q) => $q->where('name', 'like', "%{$this->search}%"))
             ->orderBy('name')
-            ->get();
+            ->get(['id', 'name', 'medical_record_number']);
     }
 
     public function getConsultationsProperty()
@@ -74,6 +76,7 @@ class extends Component {
         $this->medical_prescriptions = $consultation->medical_prescriptions;
         $this->next_appointment = $consultation->next_appointment;
         $this->follow_up_instructions = $consultation->follow_up_instructions;
+        $this->existingDocuments = $consultation->documents ?? [];
         $this->showModal = true;
     }
 
@@ -108,42 +111,71 @@ class extends Component {
         if ($this->editingId) {
             $consultation = Medecine::findOrFail($this->editingId);
             $consultation->update($data);
-            session()->flash('success', 'Consultation modifiée avec succès.');
+            $this->success('Consultation modifiée.');
         } else {
             $consultation = Medecine::create($data);
-            session()->flash('success', 'Consultation créée avec succès.');
+            $this->success('Consultation créée.');
         }
 
-        // Gestion des fichiers
         if (!empty($this->documents)) {
+            $documents = $consultation->documents ?? [];
             foreach ($this->documents as $file) {
                 $path = $file->store("patients/{$this->patientId}/medecine", 'public');
-                $documents = $consultation->documents ?? [];
-                $documents[] = ['path' => $path, 'original_name' => $file->getClientOriginalName()];
-                $consultation->documents = $documents;
-                $consultation->save();
+                $documents[] = ['path' => $path, 'original_name' => $file->getClientOriginalName(), 'size' => $file->getSize()];
             }
+            $consultation->documents = $documents;
+            $consultation->save();
         }
 
         $this->showModal = false;
         $this->resetForm();
     }
 
+    public function deleteDocument($index)
+    {
+        $consultation = Medecine::findOrFail($this->editingId);
+        $documents = $consultation->documents ?? [];
+        if (isset($documents[$index])) {
+            \Storage::disk('public')->delete($documents[$index]['path']);
+            array_splice($documents, $index, 1);
+            $consultation->documents = $documents;
+            $consultation->save();
+            $this->existingDocuments = $documents;
+            $this->success('Document supprimé.');
+        }
+    }
+
+    public function downloadDocument($index)
+    {
+        $consultation = Medecine::findOrFail($this->editingId);
+        $documents = $consultation->documents ?? [];
+        if (isset($documents[$index])) {
+            return response()->download(storage_path('app/public/' . $documents[$index]['path']), $documents[$index]['original_name']);
+        }
+    }
+
+    public function downloadPdf($id)
+    {
+        $consultation = Medecine::with(['patient', 'doctor'])->findOrFail($id);
+        $pdf = Pdf::loadView('pdf.medecine', ['consultation' => $consultation]);
+        return response()->streamDownload(fn () => print($pdf->output()), 'medecine_' . $consultation->patient->medical_record_number . '.pdf');
+    }
+
     public function delete($id)
     {
-        Medecine::findOrFail($id)->delete();
-        session()->flash('success', 'Consultation supprimée avec succès.');
+        $consultation = Medecine::findOrFail($id);
+        if ($consultation->documents) {
+            foreach ($consultation->documents as $doc) {
+                \Storage::disk('public')->delete($doc['path']);
+            }
+        }
+        $consultation->delete();
+        $this->success('Consultation supprimée.');
     }
 
     public function resetForm()
     {
-        $this->reset([
-            'editingId', 'patientId', 'consultation_date',
-            'consultation_reason', 'illness_history', 'medical_history',
-            'physical_examination', 'diagnostic_hypothesis', 'requested_exams',
-            'prescribed_treatments', 'medical_prescriptions', 'next_appointment',
-            'follow_up_instructions', 'documents'
-        ]);
+        $this->reset(['editingId', 'patientId', 'consultation_date', 'consultation_reason', 'illness_history', 'medical_history', 'physical_examination', 'diagnostic_hypothesis', 'requested_exams', 'prescribed_treatments', 'medical_prescriptions', 'next_appointment', 'follow_up_instructions', 'documents', 'existingDocuments']);
         $this->resetValidation();
     }
 
@@ -159,156 +191,81 @@ class extends Component {
 ?>
 
 <div>
-    {{-- En-tête --}}
-    <div class="flex justify-between items-center mb-6">
-        <div>
-            <h1 class="text-3xl font-bold">Consultations Médecine Générale</h1>
-            <p class="text-base-content/70 mt-1">Consultations médicales généralistes</p>
-        </div>
-        <button wire:click="create" class="btn btn-primary">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            Nouvelle consultation
-        </button>
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
+        <div><h1 class="text-3xl font-bold">Médecine Générale</h1><p class="text-base-content/70">Consultations médicales généralistes</p></div>
+        <x-button label="Nouvelle consultation" icon="o-plus" class="btn-primary" wire:click="create" />
     </div>
 
-    {{-- Filtres --}}
-    <div class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <select wire:model.live="patient_id" class="select select-bordered w-full">
-                    <option value="">Tous les patients</option>
-                    @foreach($patients as $patient)
-                        <option value="{{ $patient->id }}">{{ $patient->name }}</option>
-                    @endforeach
-                </select>
+    <x-card class="mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <x-select label="Patient" wire:model.live="patient_id" :options="$patients" option-value="id" option-label="name" placeholder="Tous" id="patient_id" name="patient_id" clearable />
+            <x-input label="Recherche" icon="o-magnifying-glass" wire:model.live.debounce.300ms="search" clearable />
+        </div>
+    </x-card>
 
-                <input type="text" wire:model.live.debounce.300ms="search" placeholder="Rechercher..." class="input input-bordered w-full" />
+    <x-card>
+        <x-table :headers="[['key' => 'consultation_date', 'label' => 'Date'], ['key' => 'patient.name', 'label' => 'Patient'], ['key' => 'consultation_reason', 'label' => 'Motif'], ['key' => 'diagnostic_hypothesis', 'label' => 'Diagnostic']]" :rows="$consultations" with-pagination striped>
+            @scope('cell_consultation_date', $consultation){{ \Carbon\Carbon::parse($consultation['consultation_date'])->format('d/m/Y') }}@endscope
+            @scope('actions', $consultation)
+                <div class="flex gap-1">
+                    <x-button icon="o-arrow-down-tray" class="btn-circle btn-ghost btn-sm" tooltip-left="PDF" wire:click="downloadPdf({{ $consultation['id'] }})" spinner />
+                    <x-button icon="o-pencil" class="btn-circle btn-ghost btn-sm" wire:click="edit({{ $consultation['id'] }})" />
+                    <x-button icon="o-trash" class="btn-circle btn-ghost btn-sm" wire:click="delete({{ $consultation['id'] }})" wire:confirm="Supprimer ?" />
+                </div>
+            @endscope
+        </x-table>
+    </x-card>
+
+    <x-modal wire:model="showModal" title="{{ $editingId ? 'Modifier' : 'Nouvelle consultation' }}" size="3xl" separator>
+        <x-form wire:submit="save">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <x-select label="Patient" wire:model="patientId" :options="$patients" option-value="id" option-label="name" required id="patientId" name="patientId" />
+                <x-datepicker label="Date" wire:model="consultation_date" required id="consultation_date" name="consultation_date" />
             </div>
-        </div>
-    </div>
-
-    {{-- Tableau --}}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body p-0 overflow-x-auto">
-            <table class="table table-zebra">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Patient</th>
-                        <th>Motif</th>
-                        <th>Diagnostic</th>
-                        <th>Médecin</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($consultations as $consultation)
-                    <tr class="hover">
-                        <td>{{ \Carbon\Carbon::parse($consultation->consultation_date)->format('d/m/Y') }}</td>
-                        <td class="font-medium">{{ $consultation->patient->name }}</td>
-                        <td>{{ Str::limit($consultation->consultation_reason, 40) ?? '-' }}</td>
-                        <td>{{ Str::limit($consultation->diagnostic_hypothesis, 40) ?? '-' }}</td>
-                        <td>{{ $consultation->doctor->name }}</td>
-                        <td>
-                            <div class="flex gap-2">
-                                <button wire:click="edit({{ $consultation->id }})" class="btn btn-sm btn-ghost">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                </button>
-                                <button wire:click="delete({{ $consultation->id }})" wire:confirm="Supprimer cette consultation ?" class="btn btn-sm btn-ghost text-error">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
+            <div class="tabs tabs-boxed mb-4">
+                <a class="tab tab-active" onclick="event.preventDefault(); showTab('tab-clinical')">Clinique</a>
+                <a class="tab" onclick="event.preventDefault(); showTab('tab-treatment')">Traitement</a>
+                <a class="tab" onclick="event.preventDefault(); showTab('tab-documents')">Documents</a>
+            </div>
+            <div id="tab-clinical" class="space-y-4">
+                <x-textarea label="Motif" wire:model="consultation_reason" rows="2" />
+                <x-textarea label="Histoire maladie" wire:model="illness_history" rows="3" />
+                <x-textarea label="Antécédents" wire:model="medical_history" rows="2" />
+                <x-textarea label="Examen physique" wire:model="physical_examination" rows="3" />
+                <x-textarea label="Diagnostic" wire:model="diagnostic_hypothesis" rows="2" />
+            </div>
+            <div id="tab-treatment" class="space-y-4 hidden">
+                <x-textarea label="Examens" wire:model="requested_exams" rows="2" />
+                <x-textarea label="Traitements" wire:model="prescribed_treatments" rows="3" />
+                <x-textarea label="Ordonnance" wire:model="medical_prescriptions" rows="3" />
+                <x-datepicker label="Prochain RDV" wire:model="next_appointment" />
+                <x-textarea label="Instructions" wire:model="follow_up_instructions" rows="2" />
+            </div>
+            <div id="tab-documents" class="space-y-4 hidden">
+                @if(count($existingDocuments) > 0)
+                    @foreach($existingDocuments as $index => $doc)
+                        <div class="flex justify-between items-center p-2 bg-base-200 rounded">
+                            <span>{{ $doc['original_name'] }}</span>
+                            <div class="flex gap-1">
+                                <x-button icon="o-arrow-down-tray" class="btn-xs btn-ghost" wire:click="downloadDocument({{ $index }})" />
+                                <x-button icon="o-trash" class="btn-xs btn-ghost text-error" wire:click="deleteDocument({{ $index }})" />
                             </div>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="6" class="text-center py-8">Aucune consultation trouvée</td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-        <div class="card-actions justify-end p-4">
-            {{ $consultations->links() }}
-        </div>
-    </div>
-
-    {{-- Modal Formulaire --}}
-    <dialog class="modal {{ $showModal ? 'modal-open' : '' }}">
-        <div class="modal-box w-11/12 max-w-4xl">
-            <h3 class="font-bold text-lg mb-4">{{ $editingId ? 'Modifier la consultation' : 'Nouvelle consultation' }}</h3>
-
-            <form wire:submit="save">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div class="form-control">
-                        <label class="label"><span class="label-text font-medium">Patient *</span></label>
-                        <select wire:model="patientId" class="select select-bordered" required>
-                            <option value="">Sélectionner un patient</option>
-                            @foreach($patients as $patient)
-                                <option value="{{ $patient->id }}">{{ $patient->name }} - {{ $patient->medical_record_number }}</option>
-                            @endforeach
-                        </select>
-                        @error('patientId') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-
-                    <div class="form-control">
-                        <label class="label"><span class="label-text font-medium">Date de consultation *</span></label>
-                        <input type="date" wire:model="consultation_date" class="input input-bordered" required />
-                        @error('consultation_date') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-                </div>
-
-                {{-- Sections --}}
-                <div class="tabs tabs-boxed mb-4">
-                    <a class="tab tab-active" onclick="event.preventDefault(); showTab('tab-clinical')">Clinique</a>
-                    <a class="tab" onclick="event.preventDefault(); showTab('tab-treatment')">Traitement</a>
-                </div>
-
-                <div id="tab-clinical" class="space-y-4">
-                    <textarea wire:model="consultation_reason" class="textarea textarea-bordered w-full" rows="2" placeholder="Motif de consultation"></textarea>
-                    <textarea wire:model="illness_history" class="textarea textarea-bordered w-full" rows="3" placeholder="Histoire de la maladie"></textarea>
-                    <textarea wire:model="medical_history" class="textarea textarea-bordered w-full" rows="2" placeholder="Antécédents médicaux"></textarea>
-                    <textarea wire:model="physical_examination" class="textarea textarea-bordered w-full" rows="3" placeholder="Examen physique"></textarea>
-                    <textarea wire:model="diagnostic_hypothesis" class="textarea textarea-bordered w-full" rows="2" placeholder="Hypothèse diagnostique"></textarea>
-                </div>
-
-                <div id="tab-treatment" class="space-y-4 hidden">
-                    <textarea wire:model="requested_exams" class="textarea textarea-bordered w-full" rows="2" placeholder="Examens demandés"></textarea>
-                    <textarea wire:model="prescribed_treatments" class="textarea textarea-bordered w-full" rows="3" placeholder="Traitements prescrits"></textarea>
-                    <textarea wire:model="medical_prescriptions" class="textarea textarea-bordered w-full" rows="3" placeholder="Ordonnance"></textarea>
-                    <input type="date" wire:model="next_appointment" class="input input-bordered w-full" placeholder="Prochain rendez-vous" />
-                    <textarea wire:model="follow_up_instructions" class="textarea textarea-bordered w-full" rows="2" placeholder="Instructions de suivi"></textarea>
-
-                    <div class="form-control">
-                        <label class="label"><span class="label-text">Documents (PDF, Images)</span></label>
-                        <input type="file" wire:model="documents" multiple class="file-input file-input-bordered w-full" />
-                        @error('documents.*') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-                </div>
-
-                <div class="modal-action mt-6">
-                    <button type="button" wire:click="$set('showModal', false)" class="btn btn-ghost">Annuler</button>
-                    <button type="submit" class="btn btn-primary">Enregistrer</button>
-                </div>
-            </form>
-        </div>
-        <form method="dialog" class="modal-backdrop">
-            <button wire:click="$set('showModal', false)">Fermer</button>
-        </form>
-    </dialog>
+                        </div>
+                    @endforeach
+                @endif
+                <x-file label="Documents" wire:model="documents" multiple accept="pdf,jpg,jpeg,png" />
+            </div>
+            <x-slot:actions>
+                <x-button label="Annuler" wire:click="$set('showModal', false)" />
+                <x-button label="Enregistrer" class="btn-primary" type="submit" spinner="save" />
+            </x-slot:actions>
+        </x-form>
+    </x-modal>
 </div>
 
 <script>
     function showTab(tabId) {
-        document.querySelectorAll('#tab-clinical, #tab-treatment').forEach(tab => {
-            tab.classList.add('hidden');
-        });
+        document.querySelectorAll('#tab-clinical, #tab-treatment, #tab-documents').forEach(t => t.classList.add('hidden'));
         document.getElementById(tabId).classList.remove('hidden');
         document.querySelectorAll('.tabs a').forEach(t => t.classList.remove('tab-active'));
         event.target.classList.add('tab-active');

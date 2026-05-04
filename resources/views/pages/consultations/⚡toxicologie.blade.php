@@ -4,15 +4,17 @@ use Livewire\Attributes\Title;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
+use Mary\Traits\Toast;
 use App\Models\Toxicology;
 use App\Models\Patient;
-use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 new
 #[Title('Consultations - Toxicologie')]
 class extends Component {
-    use WithPagination, WithFileUploads;
+    use WithPagination, WithFileUploads, Toast;
 
+    // Filtres
     public string $search = '';
     public ?int $patient_id = null;
     public array $sortBy = ['column' => 'consultation_date', 'direction' => 'desc'];
@@ -20,10 +22,10 @@ class extends Component {
     // Formulaire
     public bool $showModal = false;
     public ?int $editingId = null;
-
-    // Histoire des conduites addictives
     public ?int $patientId = null;
     public string $consultation_date = '';
+
+    // Histoire des conduites addictives
     public string $substances_used = '';
     public ?int $substances_start_age = null;
     public string $substances_start_reason = '';
@@ -50,13 +52,14 @@ class extends Component {
 
     // Documents
     public $documents = [];
+    public array $existingDocuments = [];
 
     public function getPatientsProperty()
     {
         return Patient::query()
             ->when($this->search, fn($q) => $q->where('name', 'like', "%{$this->search}%"))
             ->orderBy('name')
-            ->get();
+            ->get(['id', 'name', 'medical_record_number']);
     }
 
     public function getConsultationsProperty()
@@ -101,6 +104,7 @@ class extends Component {
         $this->diagnostic_conclusion = $consultation->diagnostic_conclusion;
         $this->treatment_plan = $consultation->treatment_plan;
         $this->recommendations = $consultation->recommendations;
+        $this->existingDocuments = $consultation->documents ?? [];
         $this->showModal = true;
     }
 
@@ -111,7 +115,7 @@ class extends Component {
             'consultation_date' => 'required|date',
             'substances_used' => 'nullable|string',
             'diagnostic_conclusion' => 'nullable|string',
-            'documents.*' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'documents.*' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
         ]);
 
         $data = [
@@ -143,31 +147,77 @@ class extends Component {
         if ($this->editingId) {
             $consultation = Toxicology::findOrFail($this->editingId);
             $consultation->update($data);
-            session()->flash('success', 'Consultation modifiée avec succès.');
+            $this->success('Consultation modifiée avec succès.');
         } else {
             $consultation = Toxicology::create($data);
-            session()->flash('success', 'Consultation créée avec succès.');
+            $this->success('Consultation créée avec succès.');
         }
 
-        // Gestion des fichiers
+        // Gestion des nouveaux fichiers
         if (!empty($this->documents)) {
+            $documents = $consultation->documents ?? [];
             foreach ($this->documents as $file) {
                 $path = $file->store("patients/{$this->patientId}/toxicologie", 'public');
-                $consultation->documents = array_merge($consultation->documents ?? [], [
-                    ['path' => $path, 'original_name' => $file->getClientOriginalName()]
-                ]);
-                $consultation->save();
+                $documents[] = [
+                    'path' => $path,
+                    'original_name' => $file->getClientOriginalName(),
+                    'size' => $file->getSize(),
+                    'mime_type' => $file->getMimeType(),
+                    'uploaded_at' => now()->toISOString()
+                ];
             }
+            $consultation->documents = $documents;
+            $consultation->save();
         }
 
         $this->showModal = false;
         $this->resetForm();
     }
 
+    public function deleteDocument($index)
+    {
+        $consultation = Toxicology::findOrFail($this->editingId);
+        $documents = $consultation->documents ?? [];
+        if (isset($documents[$index])) {
+            \Storage::disk('public')->delete($documents[$index]['path']);
+            array_splice($documents, $index, 1);
+            $consultation->documents = $documents;
+            $consultation->save();
+            $this->existingDocuments = $documents;
+            $this->success('Document supprimé avec succès.');
+        }
+    }
+
+    public function downloadDocument($index)
+    {
+        $consultation = Toxicology::findOrFail($this->editingId);
+        $documents = $consultation->documents ?? [];
+        if (isset($documents[$index])) {
+            return response()->download(storage_path('app/public/' . $documents[$index]['path']), $documents[$index]['original_name']);
+        }
+    }
+
+    public function downloadPdf($id)
+    {
+        $consultation = Toxicology::with(['patient', 'doctor'])->findOrFail($id);
+        $pdf = Pdf::loadView('pdf.toxicologie', ['consultation' => $consultation]);
+        return response()->streamDownload(
+            fn () => print($pdf->output()),
+            'toxicologie_' . $consultation->patient->medical_record_number . '_' . $consultation->consultation_date . '.pdf'
+        );
+    }
+
     public function delete($id)
     {
-        Toxicology::findOrFail($id)->delete();
-        session()->flash('success', 'Consultation supprimée avec succès.');
+        $consultation = Toxicology::findOrFail($id);
+        // Supprimer les fichiers associés
+        if ($consultation->documents) {
+            foreach ($consultation->documents as $doc) {
+                \Storage::disk('public')->delete($doc['path']);
+            }
+        }
+        $consultation->delete();
+        $this->success('Consultation supprimée avec succès.');
     }
 
     public function resetForm()
@@ -179,7 +229,7 @@ class extends Component {
             'stop_motivation', 'max_abstinence_duration',
             'weight_loss', 'pale_complexion', 'withdrawal_insomnia', 'nightmares',
             'hallucinations', 'somatic_disorders', 'behavioral_delirium', 'legal_issues',
-            'diagnostic_conclusion', 'treatment_plan', 'recommendations', 'documents'
+            'diagnostic_conclusion', 'treatment_plan', 'recommendations', 'documents', 'existingDocuments'
         ]);
         $this->resetValidation();
     }
@@ -197,204 +247,185 @@ class extends Component {
 
 <div>
     {{-- En-tête --}}
-    <div class="flex justify-between items-center mb-6">
+    <div class="flex flex-wrap justify-between items-center gap-4 mb-6">
         <div>
             <h1 class="text-3xl font-bold">Consultations Toxicologie</h1>
             <p class="text-base-content/70 mt-1">Gestion des évaluations en addictologie</p>
         </div>
-        <button wire:click="create" class="btn btn-primary">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            Nouvelle consultation
-        </button>
+        <x-button label="Nouvelle consultation" icon="o-plus" class="btn-primary" wire:click="create" />
     </div>
 
     {{-- Filtres --}}
-    <div class="card bg-base-100 shadow mb-6">
-        <div class="card-body">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <select wire:model.live="patient_id" class="select select-bordered w-full">
-                    <option value="">Tous les patients</option>
-                    @foreach($patients as $patient)
-                        <option value="{{ $patient->id }}">{{ $patient->name }}</option>
-                    @endforeach
-                </select>
+    <x-card class="mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <x-select
+                label="Patient"
+                wire:model.live="patient_id"
+                :options="$patients"
+                option-value="id"
+                option-label="name"
+                placeholder="Tous les patients"
+                id="patient_id"
+                name="patient_id"
+                clearable />
 
-                <input type="text" wire:model.live.debounce.300ms="search" placeholder="Rechercher..." class="input input-bordered w-full" />
-            </div>
+            <x-input
+                label="Recherche"
+                icon="o-magnifying-glass"
+                placeholder="Nom du patient..."
+                wire:model.live.debounce.300ms="search"
+                clearable />
         </div>
-    </div>
+    </x-card>
 
     {{-- Tableau --}}
-    <div class="card bg-base-100 shadow">
-        <div class="card-body p-0 overflow-x-auto">
-            <table class="table table-zebra">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Patient</th>
-                        <th>Substances</th>
-                        <th>Médecin</th>
-                        <th>Conclusion</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($consultations as $consultation)
-                    <tr class="hover">
-                        <td>{{ \Carbon\Carbon::parse($consultation->consultation_date)->format('d/m/Y') }}</td>
-                        <td class="font-medium">{{ $consultation->patient->name }}</td>
-                        <td>{{ Str::limit($consultation->substances_used, 30) ?? '-' }}</td>
-                        <td>{{ $consultation->doctor->name }}</td>
-                        <td>{{ Str::limit($consultation->diagnostic_conclusion, 30) ?? '-' }}</td>
-                        <td>
-                            <div class="flex gap-2">
-                                <button wire:click="edit({{ $consultation->id }})" class="btn btn-sm btn-ghost">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                </button>
-                                <button wire:click="delete({{ $consultation->id }})" wire:confirm="Supprimer cette consultation ?" class="btn btn-sm btn-ghost text-error">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="6" class="text-center py-8">Aucune consultation trouvée</td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-        <div class="card-actions justify-end p-4">
-            {{ $consultations->links() }}
-        </div>
-    </div>
+    <x-card>
+        <x-table
+            :headers="[
+                ['key' => 'consultation_date', 'label' => 'Date'],
+                ['key' => 'patient.name', 'label' => 'Patient'],
+                ['key' => 'substances_used', 'label' => 'Substances'],
+                ['key' => 'doctor.name', 'label' => 'Médecin'],
+                ['key' => 'diagnostic_conclusion', 'label' => 'Conclusion'],
+            ]"
+            :rows="$consultations"
+            :sort-by="$sortBy"
+            with-pagination
+            striped>
+
+            @scope('cell_consultation_date', $consultation)
+                {{ \Carbon\Carbon::parse($consultation['consultation_date'])->format('d/m/Y') }}
+            @endscope
+
+            @scope('cell_substances_used', $consultation)
+                {{ Str::limit($consultation['substances_used'], 40) ?? '-' }}
+            @endscope
+
+            @scope('actions', $consultation)
+                <div class="flex gap-1">
+                    <x-button icon="o-arrow-down-tray" class="btn-circle btn-ghost btn-sm"
+                        tooltip-left="Télécharger PDF" wire:click="downloadPdf({{ $consultation['id'] }})" spinner />
+                    <x-button icon="o-pencil" class="btn-circle btn-ghost btn-sm"
+                        tooltip-left="Modifier" wire:click="edit({{ $consultation['id'] }})" />
+                    <x-button icon="o-trash" class="btn-circle btn-ghost btn-sm"
+                        tooltip-left="Supprimer" wire:click="delete({{ $consultation['id'] }})"
+                        wire:confirm="Supprimer cette consultation ?" />
+                </div>
+            @endscope
+        </x-table>
+    </x-card>
 
     {{-- Modal Formulaire --}}
-    <dialog class="modal {{ $showModal ? 'modal-open' : '' }}">
-        <div class="modal-box w-11/12 max-w-4xl">
-            <h3 class="font-bold text-lg mb-4">{{ $editingId ? 'Modifier la consultation' : 'Nouvelle consultation' }}</h3>
+    <x-modal wire:model="showModal" title="{{ $editingId ? 'Modifier la consultation' : 'Nouvelle consultation' }}" size="4xl" separator>
+        <x-form wire:submit="save">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <x-select
+                    label="Patient"
+                    wire:model="patientId"
+                    :options="$patients"
+                    option-value="id"
+                    option-label="name"
+                    required
+                    id="patientId"
+                    name="patientId" />
 
-            <form wire:submit="save">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div class="form-control">
-                        <label class="label"><span class="label-text font-medium">Patient *</span></label>
-                        <select wire:model="patientId" class="select select-bordered" required>
-                            <option value="">Sélectionner un patient</option>
-                            @foreach($patients as $patient)
-                                <option value="{{ $patient->id }}">{{ $patient->name }} - {{ $patient->medical_record_number }}</option>
-                            @endforeach
-                        </select>
-                        @error('patientId') <span class="text-error text-xs">{{ $message }}</span> @enderror
+                <x-datepicker
+                    label="Date de consultation"
+                    wire:model="consultation_date"
+                    required
+                    id="consultation_date"
+                    name="consultation_date" />
+            </div>
+
+            {{-- Onglets --}}
+            <div class="tabs tabs-boxed mb-4">
+                <a class="tab tab-active" onclick="event.preventDefault(); showTab('tab-history')">Histoire addictive</a>
+                <a class="tab" onclick="event.preventDefault(); showTab('tab-consequences')">Conséquences</a>
+                <a class="tab" onclick="event.preventDefault(); showTab('tab-conclusion')">Conclusion & CAT</a>
+                <a class="tab" onclick="event.preventDefault(); showTab('tab-documents')">Documents</a>
+            </div>
+
+            {{-- Onglet Histoire --}}
+            <div id="tab-history" class="space-y-4">
+                <x-textarea label="Substances consommées" wire:model="substances_used" rows="2" />
+                <x-input label="Âge de début" wire:model="substances_start_age" type="number" />
+                <x-textarea label="Raison du début" wire:model="substances_start_reason" rows="2" />
+                <x-textarea label="Motivation actuelle" wire:model="current_consumption_motivation" rows="2" />
+                <x-textarea label="Description de la tolérance" wire:model="tolerance_description" rows="2" />
+                <x-textarea label="Tentatives d'arrêt" wire:model="withdrawal_attempts" rows="2" />
+                <x-textarea label="Motivation à arrêter" wire:model="stop_motivation" rows="2" />
+                <x-input label="Durée max d'abstinence" wire:model="max_abstinence_duration" />
+            </div>
+
+            {{-- Onglet Conséquences --}}
+            <div id="tab-consequences" class="space-y-4 hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <x-toggle label="Amaigrissement" wire:model="weight_loss" />
+                    <x-toggle label="Teint sombre" wire:model="pale_complexion" />
+                    <x-toggle label="Insomnie de manque" wire:model="withdrawal_insomnia" />
+                    <x-toggle label="Cauchemars" wire:model="nightmares" />
+                    <x-toggle label="Hallucinations" wire:model="hallucinations" />
+                    <x-toggle label="Troubles somatiques" wire:model="somatic_disorders" />
+                    <x-toggle label="Délire/Trouble comportement" wire:model="behavioral_delirium" />
+                    <x-toggle label="Problèmes judiciaires" wire:model="legal_issues" />
+                </div>
+            </div>
+
+            {{-- Onglet Conclusion --}}
+            <div id="tab-conclusion" class="space-y-4 hidden">
+                <x-textarea label="Conclusion diagnostique" wire:model="diagnostic_conclusion" rows="3" />
+                <x-textarea label="Plan de traitement" wire:model="treatment_plan" rows="3" />
+                <x-textarea label="Recommandations" wire:model="recommendations" rows="2" />
+            </div>
+
+            {{-- Onglet Documents --}}
+            <div id="tab-documents" class="space-y-4 hidden">
+                {{-- Documents existants --}}
+                @if(count($existingDocuments) > 0)
+                    <div class="space-y-2">
+                        <label class="label"><span class="label-text font-medium">Documents joints</span></label>
+                        @foreach($existingDocuments as $index => $doc)
+                            <div class="flex justify-between items-center p-2 bg-base-200 rounded">
+                                <div class="flex items-center gap-2">
+                                    <x-icon name="o-document" class="h-5 w-5" />
+                                    <span>{{ $doc['original_name'] }}</span>
+                                    <span class="text-xs text-base-content/60">{{ number_format($doc['size'] / 1024, 1) }} KB</span>
+                                </div>
+                                <div class="flex gap-1">
+                                    <x-button icon="o-arrow-down-tray" class="btn-xs btn-ghost"
+                                        wire:click="downloadDocument({{ $index }})" />
+                                    <x-button icon="o-trash" class="btn-xs btn-ghost text-error"
+                                        wire:click="deleteDocument({{ $index }})"
+                                        wire:confirm="Supprimer ce document ?" />
+                                </div>
+                            </div>
+                        @endforeach
                     </div>
+                @endif
 
-                    <div class="form-control">
-                        <label class="label"><span class="label-text font-medium">Date de consultation *</span></label>
-                        <input type="date" wire:model="consultation_date" class="input input-bordered" required />
-                        @error('consultation_date') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-                </div>
+                <x-file
+                    label="Ajouter des documents"
+                    wire:model="documents"
+                    accept="pdf,jpg,jpeg,png,doc,docx"
+                    multiple
+                    hint="PDF, Images, Documents (Max 10MB)" />
+            </div>
 
-                {{-- Sections --}}
-                <div class="tabs tabs-boxed mb-4">
-                    <a class="tab tab-active" onclick="event.preventDefault(); document.getElementById('tab-history').click()">Histoire addictive</a>
-                    <a class="tab" onclick="event.preventDefault(); document.getElementById('tab-consequences').click()">Conséquences</a>
-                    <a class="tab" onclick="event.preventDefault(); document.getElementById('tab-conclusion').click()">Conclusion</a>
-                </div>
-
-                {{-- Onglet Histoire --}}
-                <div id="tab-history" class="space-y-4">
-                    <textarea wire:model="substances_used" class="textarea textarea-bordered w-full" rows="2" placeholder="Substances consommées"></textarea>
-                    <input type="number" wire:model="substances_start_age" class="input input-bordered w-full" placeholder="Âge de début" />
-                    <textarea wire:model="substances_start_reason" class="textarea textarea-bordered w-full" rows="2" placeholder="Raison du début"></textarea>
-                    <textarea wire:model="current_consumption_motivation" class="textarea textarea-bordered w-full" rows="2" placeholder="Motivation actuelle"></textarea>
-                    <textarea wire:model="tolerance_description" class="textarea textarea-bordered w-full" rows="2" placeholder="Description de la tolérance"></textarea>
-                    <textarea wire:model="withdrawal_attempts" class="textarea textarea-bordered w-full" rows="2" placeholder="Tentatives d'arrêt"></textarea>
-                    <textarea wire:model="stop_motivation" class="textarea textarea-bordered w-full" rows="2" placeholder="Motivation à arrêter"></textarea>
-                    <input type="text" wire:model="max_abstinence_duration" class="input input-bordered w-full" placeholder="Durée max d'abstinence" />
-                </div>
-
-                {{-- Onglet Conséquences (caché par défaut) --}}
-                <div id="tab-consequences" class="space-y-4 hidden">
-                    <div class="grid grid-cols-2 gap-2">
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="weight_loss" class="checkbox" />
-                            <span>Amaigrissement</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="pale_complexion" class="checkbox" />
-                            <span>Teint sombre</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="withdrawal_insomnia" class="checkbox" />
-                            <span>Insomnie de manque</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="nightmares" class="checkbox" />
-                            <span>Cauchemars</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="hallucinations" class="checkbox" />
-                            <span>Hallucinations</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="somatic_disorders" class="checkbox" />
-                            <span>Troubles somatiques</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="behavioral_delirium" class="checkbox" />
-                            <span>Délire/Trouble comportement</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input type="checkbox" wire:model="legal_issues" class="checkbox" />
-                            <span>Problèmes judiciaires</span>
-                        </label>
-                    </div>
-                </div>
-
-                {{-- Onglet Conclusion --}}
-                <div id="tab-conclusion" class="space-y-4 hidden">
-                    <textarea wire:model="diagnostic_conclusion" class="textarea textarea-bordered w-full" rows="3" placeholder="Conclusion diagnostique"></textarea>
-                    <textarea wire:model="treatment_plan" class="textarea textarea-bordered w-full" rows="3" placeholder="Plan de traitement"></textarea>
-                    <textarea wire:model="recommendations" class="textarea textarea-bordered w-full" rows="2" placeholder="Recommandations"></textarea>
-
-                    <div class="form-control">
-                        <label class="label"><span class="label-text">Documents (PDF, Images)</span></label>
-                        <input type="file" wire:model="documents" multiple class="file-input file-input-bordered w-full" />
-                        @error('documents.*') <span class="text-error text-xs">{{ $message }}</span> @enderror
-                    </div>
-                </div>
-
-                <div class="modal-action mt-6">
-                    <button type="button" wire:click="$set('showModal', false)" class="btn btn-ghost">Annuler</button>
-                    <button type="submit" class="btn btn-primary">Enregistrer</button>
-                </div>
-            </form>
-        </div>
-        <form method="dialog" class="modal-backdrop">
-            <button wire:click="$set('showModal', false)">Fermer</button>
-        </form>
-    </dialog>
+            <x-slot:actions>
+                <x-button label="Annuler" wire:click="$set('showModal', false)" />
+                <x-button label="Enregistrer" class="btn-primary" type="submit" spinner="save" />
+            </x-slot:actions>
+        </x-form>
+    </x-modal>
 </div>
 
 <script>
-    // Gestion des onglets
-    document.querySelectorAll('.tabs a').forEach(tab => {
-        tab.addEventListener('click', function(e) {
-            e.preventDefault();
-            const targetId = this.getAttribute('onclick').match(/'([^']+)'/)[1];
-            document.querySelectorAll('.tabs a').forEach(t => t.classList.remove('tab-active'));
-            this.classList.add('tab-active');
-            document.getElementById('tab-history').classList.add('hidden');
-            document.getElementById('tab-consequences').classList.add('hidden');
-            document.getElementById('tab-conclusion').classList.add('hidden');
-            document.getElementById(targetId).classList.remove('hidden');
+    function showTab(tabId) {
+        document.querySelectorAll('#tab-history, #tab-consequences, #tab-conclusion, #tab-documents').forEach(tab => {
+            tab.classList.add('hidden');
         });
-    });
+        document.getElementById(tabId).classList.remove('hidden');
+        document.querySelectorAll('.tabs a').forEach(t => t.classList.remove('tab-active'));
+        event.target.classList.add('tab-active');
+    }
 </script>
