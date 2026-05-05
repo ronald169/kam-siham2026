@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
-    {{-- Chart --}}
+    {{-- Chart.js --}}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body class="min-h-screen font-sans antialiased bg-base-200">
@@ -43,8 +43,8 @@
                     <li>
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
-                            <button type="submit" class="text-error">
-                                <x-icon name="o-arrow-left-end-on-rectangle" class="h-4 w-4" />
+                            <button type="submit" class="text-error w-full text-left">
+                                <x-icon name="o-arrow-left-end-on-rectangle" class="h-4 w-4 mr-2" />
                                 Déconnexion
                             </button>
                         </form>
@@ -77,7 +77,9 @@
                         <x-slot:actions>
                             <form method="POST" action="{{ route('logout') }}">
                                 @csrf
-                                <x-button icon="o-arrow-left-end-on-rectangle" class="btn-circle btn-ghost btn-xs" tooltip-left="Déconnexion" no-wire-navigate />
+                                <button type="submit" class="btn-circle btn-ghost btn-xs">
+                                    <x-icon name="o-arrow-left-end-on-rectangle" class="h-4 w-4" tooltip-left="Déconnexion" />
+                                </button>
                             </form>
                         </x-slot:actions>
                     </x-list-item>
@@ -107,8 +109,8 @@
                 @if(auth()->user()->isConsultant())
                     <x-menu-sub title="Consultations" icon="o-document-magnifying-glass">
                         <x-menu-item title="Toxicologie" icon="o-beaker" link="{{ route('consultations.toxicologie.index') }}" />
-                        <x-menu-item title="Psychopathologie" icon="o-document-text" link="{{ route('consultations.psychopathologie') }}" />
-                        <x-menu-item title="Médecine Générale" icon="custom.stethoscope" link="{{ route('consultations.medecine') }}" />
+                        <x-menu-item title="Psychopathologie" icon="o-document-text" link="{{ route('consultations.psychopathologie.index') }}" />
+                        <x-menu-item title="Médecine Générale" icon="custom.stethoscope" link="{{ route('consultations.medecine.index') }}" />
                     </x-menu-sub>
                 @endif
 
